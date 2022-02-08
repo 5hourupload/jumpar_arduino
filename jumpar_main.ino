@@ -79,11 +79,11 @@ String powerJumpPhase = "none";
 
 
 void setup() {
-  Serial.begin(9600);
+  if (debug) Serial.begin(9600);
 
   while (!Serial); // Hold the code until serial monitor opens
   
-  Serial.println("JumpAR starting...");
+  if (debug) Serial.println("JumpAR starting...");
 
   /** Setup UART port (Serial1 on Atmega32u4) */
   Serial1.begin(19200);
@@ -96,16 +96,16 @@ void setup() {
 //  UART.nunchuck.lowerButton = true;
 //  UART.setNunchuckValues();
 
-//  //Serial.println("program starting...");
+//  //if (debug) Serial.println("program starting...");
 
-//  Serial.print("debug: ");
-//  Serial.print(debug);
-//  Serial.print(" -- ");
-//  Serial.print(" debug time:/ ");
-//  Serial.print(debugTime);
-//  Serial.print(" -- ");
-//  Serial.print(" drive: ");
-//  Serial.print(drive);
+//  if (debug) Serial.print("debug: ");
+//  if (debug) Serial.print(debug);
+//  if (debug) Serial.print(" -- ");
+//  if (debug) Serial.print(" debug time:/ ");
+//  if (debug) Serial.print(debugTime);
+//  if (debug) Serial.print(" -- ");
+//  if (debug) Serial.print(" drive: ");
+//  if (debug) Serial.print(drive);
   
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, LOW);
@@ -131,10 +131,11 @@ void loop() {
       else if (jumpStatus == "falling" && powerJumpPhase == "up" && driveStatus == "initial")
       {
         driveStatus = "brake";
-        Serial.println("Apex reached, stopping drive early");
+        if (debug) Serial.println("Apex reached, stopping drive early");
       }
       else if (jumpStatus == "none" && powerJumpPhase == "up") {
-          startJump(.05,4000);
+          if (powerJumpDutyCycle < 0)
+            startJump(.05,4000);
           powerJumpPhase = "down";
       }
       else if (powerJumpPhase == "down" && driveStatus == "none")
@@ -164,8 +165,9 @@ void loop() {
     
     
   if (millis() - lastPrint > printInterval){
-    Serial.print("Position: ");
-    Serial.println(distance);
+    if (debug) Serial.print(frames);
+    if (debug) Serial.print("Position: ");
+    if (debug) Serial.println(distance);
     lastPrint = millis();
   }
   frames++;
@@ -249,44 +251,44 @@ String parseData(){
     { 
        strtokIndx = strtok(NULL, ","); // get the 2nd part - the interation 
        powerJump = atoi(strtokIndx) == 1? true : false;     // convert this part to an integer
-       Serial.print("Set powerJump to ");
-       Serial.println(powerJump);
+       if (debug) Serial.print("Set powerJump to ");
+       if (debug) Serial.println(powerJump);
        return "";
     }
     else if (strtokIndx[0] == 'c')
     {
        strtokIndx = strtok(NULL, ","); // get the 2nd part - the interation 
        controlMode = strtokIndx[0] == 'a' ?  "arduino" : "unity";     // convert this part to an integer
-       Serial.print("Set controlMode to ");
-       Serial.println(controlMode);
+       if (debug) Serial.print("Set controlMode to ");
+       if (debug) Serial.println(controlMode);
        return "";
     }
     else if (strtokIndx[0] == 't')
     {
        strtokIndx = strtok(NULL, ","); // get the 2nd part - the interation 
        predictJumpBeginThreshold = atoi(strtokIndx);     // convert this part to an integer
-       Serial.print("Set prediction timing (m/s^2 above the minimum y acc) to ");
-       Serial.println(predictJumpBeginThreshold);
+       if (debug) Serial.print("Set prediction timing (m/s^2 above the minimum y acc) to ");
+       if (debug) Serial.println(predictJumpBeginThreshold);
        return "";
     }
     else if (strtokIndx[0] == 'd')      // not used
     {
        strtokIndx = strtok(NULL, ","); // get the 2nd part - the interation 
        powerJumpDutyCycle = atof(strtokIndx);     // convert this part to an integer
-       Serial.print("Set power jump duty cycle to ");
-       Serial.println(powerJumpDutyCycle);
+       if (debug) Serial.print("Set power jump duty cycle to ");
+       if (debug) Serial.println(powerJumpDutyCycle);
        return "";
     }
     else if (strtokIndx[0] == 's')
     {
        strtokIndx = strtok(NULL, ","); // get the 2nd part - the interation 
        powerJumpDutyCycle = atof(strtokIndx);     // convert this part to an integer
-       Serial.print("Set power jump duty cycle to ");
-       Serial.println(powerJumpDutyCycle);
+       if (debug) Serial.print("Set power jump duty cycle to ");
+       if (debug) Serial.println(powerJumpDutyCycle);
        strtokIndx = strtok(NULL, ","); // get the 2nd part - the interation 
        powerJumpDriveDuration = atof(strtokIndx);     // convert this part to an integer
-       Serial.print("Set power jump drive duration to ");
-       Serial.println(powerJumpDriveDuration);       
+       if (debug) Serial.print("Set power jump drive duration to ");
+       if (debug) Serial.println(powerJumpDriveDuration);       
        return "";
     }
     else
@@ -300,155 +302,155 @@ String parseData(){
 }
 
 void initMPU6050_pred(){
-//  //Serial.println("Adafruit MPU6050 init");
+//  //if (debug) Serial.println("Adafruit MPU6050 init");
 
   // Try to initialize!
   if (!mpu_pred.begin(0x69)) {
-    Serial.println("Failed to find MPU6050 jump prediction chip");
+    if (debug) Serial.println("Failed to find MPU6050 jump prediction chip");
     while (1) {
       delay(10);
     }
   }
-//  //Serial.println("MPU6050 Found!");
+//  //if (debug) Serial.println("MPU6050 Found!");
 
   mpu_pred.setAccelerometerRange(MPU6050_RANGE_8_G);
-//  Serial.print("Accelerometer range set to: ");
+//  if (debug) Serial.print("Accelerometer range set to: ");
   switch (mpu_pred.getAccelerometerRange()) {
   case MPU6050_RANGE_2_G:
-//    //Serial.println("+-2G");
+//    //if (debug) Serial.println("+-2G");
     break;
   case MPU6050_RANGE_4_G:
-//    //Serial.println("+-4G");
+//    //if (debug) Serial.println("+-4G");
     break;
   case MPU6050_RANGE_8_G:
-//    //Serial.println("+-8G");
+//    //if (debug) Serial.println("+-8G");
     break;
   case MPU6050_RANGE_16_G:
-//    //Serial.println("+-16G");
+//    //if (debug) Serial.println("+-16G");
     break;
   }
   mpu_pred.setGyroRange(MPU6050_RANGE_500_DEG);
-//  Serial.print("Gyro range set to: ");
+//  if (debug) Serial.print("Gyro range set to: ");
   switch (mpu_pred.getGyroRange()) {
   case MPU6050_RANGE_250_DEG:
-//    //Serial.println("+- 250 deg/s");
+//    //if (debug) Serial.println("+- 250 deg/s");
     break;
   case MPU6050_RANGE_500_DEG:
-//    //Serial.println("+- 500 deg/s");
+//    //if (debug) Serial.println("+- 500 deg/s");
     break;
   case MPU6050_RANGE_1000_DEG:
-//    //Serial.println("+- 1000 deg/s");
+//    //if (debug) Serial.println("+- 1000 deg/s");
     break;
   case MPU6050_RANGE_2000_DEG:
-//    //Serial.println("+- 2000 deg/s");
+//    //if (debug) Serial.println("+- 2000 deg/s");
     break;
   }
 
   mpu_pred.setFilterBandwidth(MPU6050_BAND_21_HZ);
-//  Serial.print("Filter bandwidth set to: ");
+//  if (debug) Serial.print("Filter bandwidth set to: ");
   switch (mpu_pred.getFilterBandwidth()) {
   case MPU6050_BAND_260_HZ:
-//    //Serial.println("260 Hz");
+//    //if (debug) Serial.println("260 Hz");
     break;
   case MPU6050_BAND_184_HZ:
-//    //Serial.println("184 Hz");
+//    //if (debug) Serial.println("184 Hz");
     break;
   case MPU6050_BAND_94_HZ:
-//    //Serial.println("94 Hz");
+//    //if (debug) Serial.println("94 Hz");
     break;
   case MPU6050_BAND_44_HZ:
-//    //Serial.println("44 Hz");
+//    //if (debug) Serial.println("44 Hz");
     break;
   case MPU6050_BAND_21_HZ:
-//    //Serial.println("21 Hz");
+//    //if (debug) Serial.println("21 Hz");
     break;
   case MPU6050_BAND_10_HZ:
-//    //Serial.println("10 Hz");
+//    //if (debug) Serial.println("10 Hz");
     break;
   case MPU6050_BAND_5_HZ:
-//    //Serial.println("5 Hz");
+//    //if (debug) Serial.println("5 Hz");
     break;
   }
 
-//  //Serial.println("");
+//  //if (debug) Serial.println("");
   delay(100);
-//  //Serial.println("MPU initialized!");
+//  //if (debug) Serial.println("MPU initialized!");
 }
 
 void initMPU6050_weight(){
-//  //Serial.println("Adafruit MPU6050 init");
+//  //if (debug) Serial.println("Adafruit MPU6050 init");
 
   // Try to initialize!
   if (!mpu_weight.begin(0x68)) {
-    Serial.println("Failed to find MPU6050 weight chip");
+    if (debug) Serial.println("Failed to find MPU6050 weight chip");
     while (1) {
       delay(10);
     }
   }
-  //Serial.println("MPU6050 Found!");
+  //if (debug) Serial.println("MPU6050 Found!");
 
   mpu_weight.setAccelerometerRange(MPU6050_RANGE_8_G);
-//  Serial.print("Accelerometer range set to: ");
+//  if (debug) Serial.print("Accelerometer range set to: ");
   switch (mpu_weight.getAccelerometerRange()) {
   case MPU6050_RANGE_2_G:
-    //Serial.println("+-2G");
+    //if (debug) Serial.println("+-2G");
     break;
   case MPU6050_RANGE_4_G:
-    //Serial.println("+-4G");
+    //if (debug) Serial.println("+-4G");
     break;
   case MPU6050_RANGE_8_G:
-    //Serial.println("+-8G");
+    //if (debug) Serial.println("+-8G");
     break;
   case MPU6050_RANGE_16_G:
-    //Serial.println("+-16G");
+    //if (debug) Serial.println("+-16G");
     break;
   }
   mpu_weight.setGyroRange(MPU6050_RANGE_500_DEG);
-//  Serial.print("Gyro range set to: ");
+//  if (debug) Serial.print("Gyro range set to: ");
   switch (mpu_weight.getGyroRange()) {
   case MPU6050_RANGE_250_DEG:
-    //Serial.println("+- 250 deg/s");
+    //if (debug) Serial.println("+- 250 deg/s");
     break;
   case MPU6050_RANGE_500_DEG:
-    //Serial.println("+- 500 deg/s");
+    //if (debug) Serial.println("+- 500 deg/s");
     break;
   case MPU6050_RANGE_1000_DEG:
-    //Serial.println("+- 1000 deg/s");
+    //if (debug) Serial.println("+- 1000 deg/s");
     break;
   case MPU6050_RANGE_2000_DEG:
-    //Serial.println("+- 2000 deg/s");
+    //if (debug) Serial.println("+- 2000 deg/s");
     break;
   }
 
   mpu_weight.setFilterBandwidth(MPU6050_BAND_21_HZ);
-//  Serial.print("Filter bandwidth set to: ");
+//  if (debug) Serial.print("Filter bandwidth set to: ");
   switch (mpu_weight.getFilterBandwidth()) {
   case MPU6050_BAND_260_HZ:
-    //Serial.println("260 Hz");
+    //if (debug) Serial.println("260 Hz");
     break;
   case MPU6050_BAND_184_HZ:
-    //Serial.println("184 Hz");
+    //if (debug) Serial.println("184 Hz");
     break;
   case MPU6050_BAND_94_HZ:
-    //Serial.println("94 Hz");
+    //if (debug) Serial.println("94 Hz");
     break;
   case MPU6050_BAND_44_HZ:
-    //Serial.println("44 Hz");
+    //if (debug) Serial.println("44 Hz");
     break;
   case MPU6050_BAND_21_HZ:
-    //Serial.println("21 Hz");
+    //if (debug) Serial.println("21 Hz");
     break;
   case MPU6050_BAND_10_HZ:
-    //Serial.println("10 Hz");
+    //if (debug) Serial.println("10 Hz");
     break;
   case MPU6050_BAND_5_HZ:
-    //Serial.println("5 Hz");
+    //if (debug) Serial.println("5 Hz");
     break;
   }
 
-  //Serial.println("");
+  //if (debug) Serial.println("");
   delay(100);
-  //Serial.println("MPU initialized!");
+  //if (debug) Serial.println("MPU initialized!");
 }
 
 
@@ -457,40 +459,40 @@ void getMPU6050(unsigned long timeStart){
   sensors_event_t a, g, temp;
   mpu_weight.getEvent(&a, &g, &temp);
 
-//  Serial.print(millis() - timeStart);
-//  Serial.print(" , ");
-//  Serial.print(a.acceleration.x);
-//  Serial.print(" , ");
-//  Serial.print(a.acceleration.y);
-//  Serial.print(" , ");
-//  Serial.print(a.acceleration.z);
-//  Serial.print(" ; ");
-//  Serial.print(jumpStatus);
-//  Serial.print(" ");
-//  //Serial.println();
+//  if (debug) Serial.print(millis() - timeStart);
+//  if (debug) Serial.print(" , ");
+//  if (debug) Serial.print(a.acceleration.x);
+//  if (debug) Serial.print(" , ");
+//  if (debug) Serial.print(a.acceleration.y);
+//  if (debug) Serial.print(" , ");
+//  if (debug) Serial.print(a.acceleration.z);
+//  if (debug) Serial.print(" ; ");
+//  if (debug) Serial.print(jumpStatus);
+//  if (debug) Serial.print(" ");
+//  //if (debug) Serial.println();
 }
 
 void printJumpStatus()
 {  
    if (jumpStatus == "none")
    {
-      Serial.print(millis());
-      Serial.println(" 0 - none");
+      if (debug) Serial.print(millis());
+      if (debug) Serial.println(" 0 - none");
    }
    if (jumpStatus == "squatting")
    {
-      Serial.print(millis());
-      Serial.println(" 1 - squatting");
+      if (debug) Serial.print(millis());
+      if (debug) Serial.println(" 1 - squatting");
    }
    if (jumpStatus == "launching")
    {
-      Serial.print(millis());
-      Serial.println(" 2 - launching");
+      if (debug) Serial.print(millis());
+      if (debug) Serial.println(" 2 - launching");
    }
    if (jumpStatus == "falling")
    {
-      Serial.print(millis());
-      Serial.println(" 3 - falling");
+      if (debug) Serial.print(millis());
+      if (debug) Serial.println(" 3 - falling");
    }
 }
 
@@ -498,6 +500,8 @@ void predictJumpStatus()
 {
   sensors_event_t a, g, temp;
   mpu_pred.getEvent(&a, &g, &temp);
+  if (debug) Serial.print("y - ");
+  if (debug) Serial.println(a.acceleration.y);
   y_avg[i%20] = a.acceleration.y;
   i++;
   float y_mov_avg = 0;
@@ -546,9 +550,9 @@ void predictJumpStatus()
    {
        if (y_mov_avg < max_y_acc - predictJumpBeginThreshold && i > 20 + maxOrMinSetI)
        {
-            if (millis() - statusStart < 100)
+            if (millis() - statusStart < 70)
             {
-              Serial.println("False jump (squatting time too short)");
+              if (debug) Serial.println("False jump (squatting time too short)");
               jumpStatus = "falling";
             }
             else
@@ -556,15 +560,24 @@ void predictJumpStatus()
                 jumpStatus = "launching";
                 min_y_acc = 9999; //Reset min_y_acc. We only care about the min_y_acc in the launching phase
                 printJumpStatus();
+                statusCounter = 0;
             }
        }
    }
     else if (jumpStatus == "launching")
     {
-       if (y_mov_avg > min_y_acc + 0 && min_y_acc < 0 && i > 20 + maxOrMinSetI) 
+        statusCounter++;
+        if (statusCounter > 800)
+        {
+            jumpStatus = "falling";
+            printJumpStatus();
+            statusCounter = 0;
+        }
+       if (y_mov_avg > min_y_acc + 1 && min_y_acc < 0 && i > 20 + maxOrMinSetI) 
        {
             jumpStatus = "falling";
             printJumpStatus();
+            statusCounter = 0;
        }
     }
     else if (jumpStatus == "falling")
@@ -617,10 +630,10 @@ void startJump(float newDutyCycle, int newTimeInMS)
   timePrev = timeZero;
   timeAtTarget = timeinms;// + timeZero;
   driveStatus = "initial";
-  Serial.print("Duty cycle: ");
-  Serial.print(dutyCycle);
-  Serial.print(" timing: ");
-  Serial.println(timeinms);
+  if (debug) Serial.print("Duty cycle: ");
+  if (debug) Serial.print(dutyCycle);
+  if (debug) Serial.print(" timing: ");
+  if (debug) Serial.println(timeinms);
   if (dutyCycle < 0) moveDirection = "up";
   else moveDirection = "down";
 }
