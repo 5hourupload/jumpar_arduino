@@ -10,7 +10,8 @@
 #include <VescUart.h>
 #include <Wire.h>
 
-#define SWITCH 10 // limit switch
+#define SWITCH_BOT 10 // limit switch bottom
+#define SWITCH_TOP 11 // limit switch top
 #define QRD1114_PIN A0 // phototransistor
 
 
@@ -41,10 +42,13 @@ Adafruit_MPU6050 mpu_pred;
 // Jump prediction variables
 float y_avg[] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 int i = 0;
-int maxOrMinSetI = -1;
+int iMarker = -1;
 int statusStart = 0;
 float max_y_acc = -9999;
 float min_y_acc = 9999;
+float velocity = 0;
+float maxVelocity = -999;
+float minVelocity = 999;
 String jumpStatus = "none";
 int statusCounter = 0;
 float predictJumpBeginThreshold = 0;
@@ -110,7 +114,8 @@ void setup() {
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, LOW);
 
-  pinMode(SWITCH, INPUT);
+  pinMode(SWITCH_BOT, INPUT);
+  pinMode(SWITCH_TOP, INPUT);
   pinMode(QRD1114_PIN, INPUT);
 
   initMPU6050_pred();
@@ -142,8 +147,8 @@ void loop() {
       {
         powerJumpPhase = "none";
       }
+      
   }
-  
 
   // Get position of the weight.
   getPosition();
@@ -180,11 +185,11 @@ void driveMotor(){
     if (timeAtTarget > millis() - timeZero) {
       // limit switch when driving down
       if (dutyCycle > 0){
-        if (digitalRead(SWITCH) == 1) driveStatus = "brake"; 
+        if (digitalRead(SWITCH_BOT) == 1) driveStatus = "brake"; 
       }
       // limit switch when driving up
       if (dutyCycle < 0){
-        if (distance > 12.5) driveStatus = "brake"; 
+        if (digitalRead(SWITCH_TOP) == 1) driveStatus = "brake"; 
       }
       if (driveStatus != "brake") {
         if (millis() - timePrev >= 900 || firstDrive == 0) { // send message every 900ms so it doesn't fill up ESC buffer
@@ -500,8 +505,10 @@ void predictJumpStatus()
 {
   sensors_event_t a, g, temp;
   mpu_pred.getEvent(&a, &g, &temp);
-  if (debug) Serial.print("y - ");
-  if (debug) Serial.println(a.acceleration.y);
+//  if (debug) Serial.print("y - ");
+//  if (debug) Serial.print(a.acceleration.y);
+//  if (debug) Serial.print(" ");
+//  if (debug) Serial.println(velocity);
   y_avg[i%20] = a.acceleration.y;
   i++;
   float y_mov_avg = 0;
@@ -510,89 +517,61 @@ void predictJumpStatus()
     y_mov_avg+=y_avg[j];
   }
   y_mov_avg/=20;
-  
-  if (max_y_acc < a.acceleration.y)
+
+  velocity += a.acceleration.y - 9.8;
+  if (abs(y_avg[i%20] - y_avg[(i-1)%20]) <.05)
+    velocity = velocity * 0.9;
+
+  if (velocity > maxVelocity)
   {
-    max_y_acc = a.acceleration.y;
-    maxOrMinSetI = i;
+    maxVelocity = velocity;
+    iMarker = i;
   }
-
-  if (max_y_acc < y_mov_avg)
+  if (velocity < minVelocity)
   {
-    max_y_acc = y_mov_avg;
-    maxOrMinSetI = i;
-  }
-
-
-  if (min_y_acc > a.acceleration.y)
-  {
-    min_y_acc = a.acceleration.y;
-    maxOrMinSetI = i;
-  }
-
-  if (min_y_acc > y_mov_avg)
-  {
-    min_y_acc = y_mov_avg;
-    maxOrMinSetI = i;
+    minVelocity = velocity;
+    iMarker = i;
   }
 
   if (jumpStatus == "none")
   {
-        if (y_mov_avg > 12)
+        if (velocity > 150)
         {
             jumpStatus = "squatting";
             statusStart = millis();
-            max_y_acc = -9999;
+            maxVelocity = -999;
             printJumpStatus();
         }
   }
    else if (jumpStatus == "squatting")
    {
-       if (y_mov_avg < max_y_acc - predictJumpBeginThreshold && i > 20 + maxOrMinSetI)
+       if (velocity < maxVelocity && i > 5 + iMarker)
        {
-            if (millis() - statusStart < 70)
-            {
-              if (debug) Serial.println("False jump (squatting time too short)");
-              jumpStatus = "falling";
-            }
-            else
-            {
-                jumpStatus = "launching";
-                min_y_acc = 9999; //Reset min_y_acc. We only care about the min_y_acc in the launching phase
-                printJumpStatus();
-                statusCounter = 0;
-            }
+           jumpStatus = "launching";
+           printJumpStatus();            
        }
    }
     else if (jumpStatus == "launching")
     {
-        statusCounter++;
-        if (statusCounter > 800)
-        {
-            jumpStatus = "falling";
-            printJumpStatus();
-            statusCounter = 0;
-        }
-       if (y_mov_avg > min_y_acc + 1 && min_y_acc < 0 && i > 20 + maxOrMinSetI) 
+       if (velocity < 0) 
        {
             jumpStatus = "falling";
             printJumpStatus();
-            statusCounter = 0;
+            minVelocity = 999;
        }
     }
     else if (jumpStatus == "falling")
     {
-        statusCounter++;
-        if (statusCounter > 800)
+       if (velocity > minVelocity && i > 5 + iMarker)
         {
             jumpStatus = "none";
             printJumpStatus();
-            statusCounter = 0;
-            max_y_acc = -9999;
         }
     }
 }
 
+
+// IR position sensor: 
 void getPosition()
 {
   int proximity = digitalRead(QRD1114_PIN);
@@ -612,7 +591,7 @@ void getPosition()
       }
       currentColor = "black";
     }
-    if (digitalRead(SWITCH))
+    if (digitalRead(SWITCH_BOT))
     {
       distance = 0;
       moveDirection = "up";
