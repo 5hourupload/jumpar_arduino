@@ -22,6 +22,7 @@ bool debugJumpAccel = false;
 bool debugSW = false;
 bool debugTime = false;
 bool drive = true;
+bool onlyPrediction = true;
 bool motorLED = false; // visual marker for driving debugging
 bool predLED = true;   // visual marker for prediction debugging
 
@@ -95,48 +96,50 @@ String powerJumpPhase = "none";
 
 
 void setup() {
+  /** Setup serial port for computer com **/
   Serial.begin(9600);
 
 //  while (!Serial); // Hold the code until serial monitor opens
   
   Serial.println("JumpAR program begins...");
 
-  /** Setup UART port for VESC (Serial1 on Atmega32u4) */
-  Serial1.begin(115200);
- 
-//  while (!Serial1); // Hold the code until it can connect to VESC
-
-  /** Define which ports to use as UART */
-  UART.setSerialPort(&Serial1);
-
-  Serial.println("UART initialization successful!");
-
-//  UART.nunchuck.lowerButton = true;
-//  UART.setNunchuckValues();
-
-//  //if (debug) Serial.println("program starting...");
-
-//  if (debug) Serial.print("debug: ");
-//  if (debug) Serial.print(debug);
-//  if (debug) Serial.print(" -- ");
-//  if (debug) Serial.print(" debug time:/ ");
-//  if (debug) Serial.print(debugTime);
-//  if (debug) Serial.print(" -- ");
-//  if (debug) Serial.print(" drive: ");
-//  if (debug) Serial.print(drive);
+  if (!onlyPrediction){
+    /** Setup UART port for VESC (Serial1 on Atmega32u4) */
+    Serial1.begin(115200);
+   
+    //  while (!Serial1); // Hold the code until it can connect to VESC
   
-  pinMode(LED_BUILTIN, OUTPUT);
-  digitalWrite(LED_BUILTIN, LOW);
-
-  pinMode(SWITCH_BOT, INPUT);
-  pinMode(SWITCH_TOP, INPUT);
-  pinMode(QRD1114_PIN, INPUT);
-  pinMode(RELAY, OUTPUT);
-
-  digitalWrite(RELAY, LOW); // default turn off subwoofer
+    /** Define which ports to use as UART */
+    UART.setSerialPort(&Serial1);
+  
+    Serial.println("UART initialization successful!");
+  
+    //  UART.nunchuck.lowerButton = true;
+    //  UART.setNunchuckValues();
+    
+    //  //if (debug) Serial.println("program starting...");
+    
+    //  if (debug) Serial.print("debug: ");
+    //  if (debug) Serial.print(debug);
+    //  if (debug) Serial.print(" -- ");
+    //  if (debug) Serial.print(" debug time:/ ");
+    //  if (debug) Serial.print(debugTime);
+    //  if (debug) Serial.print(" -- ");
+    //  if (debug) Serial.print(" drive: ");
+    //  if (debug) Serial.print(drive);
+    
+    pinMode(LED_BUILTIN, OUTPUT);
+    digitalWrite(LED_BUILTIN, LOW);
+  
+    pinMode(SWITCH_BOT, INPUT);
+    pinMode(SWITCH_TOP, INPUT);
+    pinMode(QRD1114_PIN, INPUT);
+    pinMode(RELAY, OUTPUT);
+  
+    digitalWrite(RELAY, LOW); // default turn off subwoofer
+  }
 
   initMPU6050_pred();
-
   Serial.println("IMU initialization successful!");
 
 //  initMPU6050_weight();
@@ -148,47 +151,74 @@ void loop() {
   // Predict user's jump status
     predictJumpStatus();
 
-  // Perform powered jump if we are in powered jump mode and the user jumps
-  if (controlMode == "arduino") {
-      if (jumpStatus == predStartDrive && powerJumpPhase == "none" && powerJump) { // condition to start drive
-          startJump(powerJumpDutyCycle,powerJumpDriveDuration);
-          powerJumpPhase = "up";
-      }
-      else if (jumpStatus == predStopDrive && powerJumpPhase == "up" && driveStatus == "initial" && powerJump) // condition to stop drive
-      {
-        driveStatus = "brake";
-        if (debug) Serial.println("Apex reached, stopping drive early");
-      }
-      else if (jumpStatus == 1 && powerJumpPhase == "up") { // condition to reset weight
-          if (powerJumpDutyCycle < 0)
-            startJump(.05,4000);
-          else if (powerJumpDutyCycle > 0)
-            startJump(-.05,4000);
-          powerJumpPhase = "down";
-      }
-      else if (powerJumpPhase == "down" && driveStatus == "none")
-      {
-        powerJumpPhase = "none";
-      }  
-  }
-
-  // Get position of the weight.
-  getPosition();
+  if (!onlyPrediction){
+    // Perform powered jump if we are in powered jump mode and the user jumps
+    if (controlMode == "arduino") {
+        if (jumpStatus == predStartDrive && powerJumpPhase == "none" && powerJump) { // condition to start drive
+            startJump(powerJumpDutyCycle,powerJumpDriveDuration);
+            powerJumpPhase = "up";
+        }
+        else if (jumpStatus == predStopDrive && powerJumpPhase == "up" && driveStatus == "initial" && powerJump) // condition to stop drive
+        {
+          driveStatus = "brake";
+          if (debug) Serial.println("Apex reached, stopping drive early");
+        }
+        else if (jumpStatus == 1 && powerJumpPhase == "up") { // condition to reset weight
+            if (powerJumpDutyCycle < 0)
+              startJump(.05,4000);
+            else if (powerJumpDutyCycle > 0)
+              startJump(-.05,4000);
+            powerJumpPhase = "down";
+        }
+        else if (powerJumpPhase == "down" && driveStatus == "none")
+        {
+          powerJumpPhase = "none";
+        }  
+    }
   
-  /** Driving logic **/
-  if (drive){
-      recvWithStartEndMarkers();
-      if (newData == true) {
-          strcpy(tempChars, receivedChars);
-              // this temporary copy is necessary to protect the original data
-              //   because strtok() used in parseData() replaces the commas with \0
-          String command = parseData();
-          newData = false;
-          if (command == "drive") startJump(dutyCycle, timeinms);
-      }
-    driveMotor();
-  // Keep ESC awake
-//  UART.setDuty(0);
+    /** Driving logic **/
+    if (drive){
+        recvWithStartEndMarkers();
+        if (newData == true) {
+            strcpy(tempChars, receivedChars);
+                // this temporary copy is necessary to protect the original data
+                //   because strtok() used in parseData() replaces the commas with \0
+            String command = parseData();
+            newData = false;
+            if (command == "drive") startJump(dutyCycle, timeinms);
+        }
+      driveMotor();
+    // Keep ESC awake
+  //  UART.setDuty(0);
+    }
+
+    // Subwoofer logic
+    if (subwooferStatus == 1){
+      digitalWrite(RELAY, LOW);
+    }
+    else{
+      digitalWrite(RELAY, HIGH);
+    }
+  
+    // auto driving - debugging reliability
+    //  startJump(-0.1, 100);
+    //  driveMotor();
+    
+    //  delay(2000);
+    //
+    //  startJump(0.1, 100);
+    //  driveMotor();
+    //
+    //  delay(2000);
+  
+    if (debugSW){
+      Serial.print("SW_B = ");
+      Serial.print(digitalRead(SWITCH_BOT));
+      Serial.print(" -- ");
+      Serial.print("SW_T = ");
+      Serial.println(digitalRead(SWITCH_TOP));
+      
+    }
   }
     
     
@@ -203,34 +233,6 @@ void loop() {
     lastPrint = millis();
   }
   frames++;
-
-  // Subwoofer logic
-  if (subwooferStatus == 1){
-    digitalWrite(RELAY, LOW);
-  }
-  else{
-    digitalWrite(RELAY, HIGH);
-  }
-
-  // auto driving - debugging reliability
-//  startJump(-0.1, 100);
-//  driveMotor();
-
-//  delay(2000);
-//
-//  startJump(0.1, 100);
-//  driveMotor();
-//
-//  delay(2000);
-
-  if (debugSW){
-    Serial.print("SW_B = ");
-    Serial.print(digitalRead(SWITCH_BOT));
-    Serial.print(" -- ");
-    Serial.print("SW_T = ");
-    Serial.println(digitalRead(SWITCH_TOP));
-    
-  }
 }
 
 
@@ -678,34 +680,6 @@ void predictJumpStatus()
       maxVelocity = -9999;
       jumpStatus = 1; 
       if (predLED) digitalWrite(LED_BUILTIN, LOW);
-    }
-}
-
-
-// IR position sensor: 
-void getPosition()
-{
-  int proximity = digitalRead(QRD1114_PIN);
-    if (proximity)
-    {
-      if (currentColor == "black")
-      {
-        distance+=interval * (moveDirection == "up" ? 1 : -1);
-      }
-      currentColor = "white";              
-    }
-    else
-    {
-      if (currentColor == "white")
-      {
-        distance+=interval * (moveDirection == "up" ? 1 : -1);
-      }
-      currentColor = "black";
-    }
-    if (digitalRead(SWITCH_BOT))
-    {
-      distance = 0;
-      moveDirection = "up";
     }
 }
 
