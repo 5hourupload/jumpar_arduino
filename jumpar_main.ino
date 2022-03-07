@@ -9,31 +9,42 @@
 #include <Adafruit_Sensor.h>
 #include <VescUart.h>
 #include <Wire.h>
+#include <math.h>
 
 #define SWITCH_BOT 10 // limit switch bottom
 #define SWITCH_TOP 11 // limit switch top
+#define RELAY 12      // relay to control subwoofer
 #define QRD1114_PIN A0 // phototransistor
 
 
 bool debug = true;
+bool debugJumpAccel = false;
+bool debugSW = false;
 bool debugTime = false;
 bool drive = true;
+bool motorLED = false; // visual marker for driving debugging
+bool predLED = true;   // visual marker for prediction debugging
 
 // driving var
 float dutyCycle = 0;
 int timeinms = 0;
+int predStartDrive = 3;
+int predStopDrive = 4;
 
 // Timer
 unsigned long timeZero, timePrev;
 unsigned long timeAtTarget;
 
-// Serila com var
+// Serial com var
 char incomingMsg;
 boolean newData = false;
 
 const byte numChars = 32;
 char receivedChars[numChars];
 char tempChars[numChars];        // temporary array for use when parsing
+
+// Subwoofer
+int subwooferStatus = 0; // 0 is off, 1 is on
 
 // MPU6050 var
 Adafruit_MPU6050 mpu_weight;
@@ -49,11 +60,12 @@ float min_y_acc = 9999;
 float velocity = 0;
 float maxVelocity = -999;
 float minVelocity = 999;
-String jumpStatus = "none";
+int jumpStatus = 1;
+int jumpTimeMode = 0;
 int statusCounter = 0;
-float predictJumpBeginThreshold = 0;
 float powerJumpDutyCycle = -.5;
 float powerJumpDriveDuration = 100;
+float YZ = 0;
 
 /** Initiate VescUart class */
 VescUart UART;
@@ -83,19 +95,21 @@ String powerJumpPhase = "none";
 
 
 void setup() {
-  if (debug) Serial.begin(9600);
+  Serial.begin(9600);
 
-  while (!Serial); // Hold the code until serial monitor opens
+//  while (!Serial); // Hold the code until serial monitor opens
   
-  if (debug) Serial.println("JumpAR starting...");
+  Serial.println("JumpAR program begins...");
 
-  /** Setup UART port (Serial1 on Atmega32u4) */
-  Serial1.begin(19200);
+  /** Setup UART port for VESC (Serial1 on Atmega32u4) */
+  Serial1.begin(115200);
  
-  while (!Serial1) {;}
+//  while (!Serial1); // Hold the code until it can connect to VESC
 
   /** Define which ports to use as UART */
   UART.setSerialPort(&Serial1);
+
+  Serial.println("UART initialization successful!");
 
 //  UART.nunchuck.lowerButton = true;
 //  UART.setNunchuckValues();
@@ -117,10 +131,17 @@ void setup() {
   pinMode(SWITCH_BOT, INPUT);
   pinMode(SWITCH_TOP, INPUT);
   pinMode(QRD1114_PIN, INPUT);
+  pinMode(RELAY, OUTPUT);
+
+  digitalWrite(RELAY, LOW); // default turn off subwoofer
 
   initMPU6050_pred();
 
+  Serial.println("IMU initialization successful!");
+
 //  initMPU6050_weight();
+
+//  delay(5000);
 }
 
 void loop() {
@@ -128,30 +149,32 @@ void loop() {
     predictJumpStatus();
 
   // Perform powered jump if we are in powered jump mode and the user jumps
-  if (controlMode == "arduino" && powerJump) {
-      if (jumpStatus == "launching" && powerJumpPhase == "none") {
+  if (controlMode == "arduino") {
+      if (jumpStatus == predStartDrive && powerJumpPhase == "none" && powerJump) { // condition to start drive
           startJump(powerJumpDutyCycle,powerJumpDriveDuration);
           powerJumpPhase = "up";
       }
-      else if (jumpStatus == "falling" && powerJumpPhase == "up" && driveStatus == "initial")
+      else if (jumpStatus == predStopDrive && powerJumpPhase == "up" && driveStatus == "initial" && powerJump) // condition to stop drive
       {
         driveStatus = "brake";
         if (debug) Serial.println("Apex reached, stopping drive early");
       }
-      else if (jumpStatus == "none" && powerJumpPhase == "up") {
+      else if (jumpStatus == 1 && powerJumpPhase == "up") { // condition to reset weight
           if (powerJumpDutyCycle < 0)
             startJump(.05,4000);
+          else if (powerJumpDutyCycle > 0)
+            startJump(-.05,4000);
           powerJumpPhase = "down";
       }
       else if (powerJumpPhase == "down" && driveStatus == "none")
       {
         powerJumpPhase = "none";
-      }
-      
+      }  
   }
 
   // Get position of the weight.
   getPosition();
+  
   /** Driving logic **/
   if (drive){
       recvWithStartEndMarkers();
@@ -170,18 +193,50 @@ void loop() {
     
     
   if (millis() - lastPrint > printInterval){
-    if (debug) Serial.print(frames);
+//    if (debug) Serial.print(frames);
     if (debug) Serial.print("Position: ");
-    if (debug) Serial.println(distance);
+    if (debug) Serial.print(distance);
+    if (debug) Serial.print(" - y: ");
+    if (debug) Serial.print(YZ);
+    if (debug) Serial.print(" YZ: ");
+    if (debug) Serial.println(velocity);
     lastPrint = millis();
   }
   frames++;
+
+  // Subwoofer logic
+  if (subwooferStatus == 1){
+    digitalWrite(RELAY, LOW);
+  }
+  else{
+    digitalWrite(RELAY, HIGH);
+  }
+
+  // auto driving - debugging reliability
+//  startJump(-0.1, 100);
+//  driveMotor();
+
+//  delay(2000);
+//
+//  startJump(0.1, 100);
+//  driveMotor();
+//
+//  delay(2000);
+
+  if (debugSW){
+    Serial.print("SW_B = ");
+    Serial.print(digitalRead(SWITCH_BOT));
+    Serial.print(" -- ");
+    Serial.print("SW_T = ");
+    Serial.println(digitalRead(SWITCH_TOP));
+    
+  }
 }
 
 
 void driveMotor(){
   if (driveStatus == "initial") {
-    digitalWrite(LED_BUILTIN, HIGH); // visual marker
+    if (motorLED) digitalWrite(LED_BUILTIN, HIGH); // visual marker
     if (timeAtTarget > millis() - timeZero) {
       // limit switch when driving down
       if (dutyCycle > 0){
@@ -204,7 +259,7 @@ void driveMotor(){
     }
   }
   if (driveStatus == "brake") {
-      digitalWrite(LED_BUILTIN, LOW); // visual marker
+      if (motorLED) digitalWrite(LED_BUILTIN, LOW); // visual marker
       if (drive) {
         UART.setDuty(0);
         driveStatus = "none";
@@ -212,7 +267,7 @@ void driveMotor(){
   }
   if (driveStatus == "none") {
     if (frames % 25 == 0)
-   UART.setDuty(0);
+      UART.setDuty(0);
   }
 }
 
@@ -251,7 +306,7 @@ void recvWithStartEndMarkers() {
 String parseData(){
     char * strtokIndx; // this is used by strtok() as an index
 
-    strtokIndx = strtok(tempChars,",");      // get the first part - the duty cycle
+    strtokIndx = strtok(tempChars,","); // arming the device: <p,0> = disarm, <p,1> = arm
     if (strtokIndx[0] == 'p')
     { 
        strtokIndx = strtok(NULL, ","); // get the 2nd part - the interation 
@@ -260,7 +315,7 @@ String parseData(){
        if (debug) Serial.println(powerJump);
        return "";
     }
-    else if (strtokIndx[0] == 'c')
+    else if (strtokIndx[0] == 'c') // setting the way the backpack is controlled, arduino or unity
     {
        strtokIndx = strtok(NULL, ","); // get the 2nd part - the interation 
        controlMode = strtokIndx[0] == 'a' ?  "arduino" : "unity";     // convert this part to an integer
@@ -268,15 +323,19 @@ String parseData(){
        if (debug) Serial.println(controlMode);
        return "";
     }
-    else if (strtokIndx[0] == 't')
+    else if (strtokIndx[0] == 't') // setting different timing modes
     {
        strtokIndx = strtok(NULL, ","); // get the 2nd part - the interation 
-       predictJumpBeginThreshold = atoi(strtokIndx);     // convert this part to an integer
-       if (debug) Serial.print("Set prediction timing (m/s^2 above the minimum y acc) to ");
-       if (debug) Serial.println(predictJumpBeginThreshold);
+       predStartDrive = atoi(strtokIndx);     // convert this part to an integer
+       strtokIndx = strtok(NULL, ","); // get the 2nd part - the interation 
+       predStopDrive = atoi(strtokIndx);
+       if (debug) Serial.print("Start driving at mode ");
+       if (debug) Serial.print(predStartDrive);
+       if (debug) Serial.print(" and stop driving at mode ");
+       if (debug) Serial.println(predStopDrive);
        return "";
     }
-    else if (strtokIndx[0] == 'd')      // not used
+    else if (strtokIndx[0] == 'd') // not used
     {
        strtokIndx = strtok(NULL, ","); // get the 2nd part - the interation 
        powerJumpDutyCycle = atof(strtokIndx);     // convert this part to an integer
@@ -284,7 +343,7 @@ String parseData(){
        if (debug) Serial.println(powerJumpDutyCycle);
        return "";
     }
-    else if (strtokIndx[0] == 's')
+    else if (strtokIndx[0] == 's') // setting the jump DC and timing
     {
        strtokIndx = strtok(NULL, ","); // get the 2nd part - the interation 
        powerJumpDutyCycle = atof(strtokIndx);     // convert this part to an integer
@@ -296,8 +355,16 @@ String parseData(){
        if (debug) Serial.println(powerJumpDriveDuration);       
        return "";
     }
-    else
+    else if (strtokIndx[0] == 'w') // turning on/off the subwoofer
     {
+       strtokIndx = strtok(NULL, ","); // get the 2nd part - the interation 
+       subwooferStatus = atof(strtokIndx);     // convert this part to an integer
+       if (debug) Serial.print("Set subwoofer to ");
+       if (debug) Serial.println(subwooferStatus);  
+       return "";
+    }
+    else
+    { // manual mode
       dutyCycle = atof(strtokIndx);  // copy it to messageFromPC
       strtokIndx = strtok(NULL, ","); // get the 2nd part - the interation 
       timeinms = atoi(strtokIndx);     // convert this part to an integer
@@ -310,7 +377,7 @@ void initMPU6050_pred(){
 //  //if (debug) Serial.println("Adafruit MPU6050 init");
 
   // Try to initialize!
-  if (!mpu_pred.begin(0x69)) {
+  if (!mpu_pred.begin(0x68)) { //69 if ADDR pulled high
     if (debug) Serial.println("Failed to find MPU6050 jump prediction chip");
     while (1) {
       delay(10);
@@ -479,37 +546,20 @@ void getMPU6050(unsigned long timeStart){
 
 void printJumpStatus()
 {  
-   if (jumpStatus == "none")
-   {
-      if (debug) Serial.print(millis());
-      if (debug) Serial.println(" 0 - none");
-   }
-   if (jumpStatus == "squatting")
-   {
-      if (debug) Serial.print(millis());
-      if (debug) Serial.println(" 1 - squatting");
-   }
-   if (jumpStatus == "launching")
-   {
-      if (debug) Serial.print(millis());
-      if (debug) Serial.println(" 2 - launching");
-   }
-   if (jumpStatus == "falling")
-   {
-      if (debug) Serial.print(millis());
-      if (debug) Serial.println(" 3 - falling");
-   }
+   if (debug) Serial.print("Jump Status = ");
+   if (debug) Serial.println(jumpStatus);
+   statusStart = millis();
 }
 
 void predictJumpStatus()
 {
   sensors_event_t a, g, temp;
   mpu_pred.getEvent(&a, &g, &temp);
-//  if (debug) Serial.print("y - ");
-//  if (debug) Serial.print(a.acceleration.y);
-//  if (debug) Serial.print(" ");
-//  if (debug) Serial.println(velocity);
-  y_avg[i%20] = a.acceleration.y;
+
+//  float angle = asin(min(9.8,abs(a.acceleration.z))/9.8);
+//  float trueYAcc = a.acceleration.y / cos(angle);
+  YZ = sqrt(a.acceleration.y * a.acceleration.y + a.acceleration.z * a.acceleration.z);
+  y_avg[i%20] = YZ;
   i++;
   float y_mov_avg = 0;
   for (int j = 0; j < 20; j++)
@@ -518,10 +568,17 @@ void predictJumpStatus()
   }
   y_mov_avg/=20;
 
-  velocity += a.acceleration.y - 9.8;
+  velocity += YZ - 9.8;
   if (abs(y_avg[i%20] - y_avg[(i-1)%20]) <.05)
-    velocity = velocity * 0.9;
+    velocity = velocity * 0.95;
 
+  if (debugJumpAccel) Serial.print("y - ");
+  if (debugJumpAccel) Serial.print(a.acceleration.y);
+  if (debugJumpAccel) Serial.print(" yz - ");
+  if (debugJumpAccel) Serial.print(YZ);
+  if (debugJumpAccel) Serial.print(" - velocity ");
+  if (debugJumpAccel) Serial.println(velocity);
+  
   if (velocity > maxVelocity)
   {
     maxVelocity = velocity;
@@ -533,40 +590,94 @@ void predictJumpStatus()
     iMarker = i;
   }
 
-  if (jumpStatus == "none")
+  if (jumpStatus == 1)
   {
-        if (velocity > 150)
+        if (velocity < -100 && i > 5 + iMarker)
         {
-            jumpStatus = "squatting";
-            statusStart = millis();
-            maxVelocity = -999;
+            jumpStatus = 2;
             printJumpStatus();
         }
   }
-   else if (jumpStatus == "squatting")
+   else if (jumpStatus == 2)
    {
-       if (velocity < maxVelocity && i > 5 + iMarker)
+       if (velocity > 0)
        {
-           jumpStatus = "launching";
+           jumpStatus = 3;
+           if (predLED) digitalWrite(LED_BUILTIN, HIGH);
+           minVelocity = -9999;
            printJumpStatus();            
        }
    }
-    else if (jumpStatus == "launching")
+    else if (jumpStatus == 3)
     {
-       if (velocity < 0) 
+       if (velocity < maxVelocity and i > 5 + iMarker) 
        {
-            jumpStatus = "falling";
+            jumpStatus = 4;
+            if (predLED) digitalWrite(LED_BUILTIN, LOW);
             printJumpStatus();
-            minVelocity = 999;
        }
     }
-    else if (jumpStatus == "falling")
+    else if (jumpStatus == 4)
     {
-       if (velocity > minVelocity && i > 5 + iMarker)
+       if (velocity < maxVelocity / 2)
         {
-            jumpStatus = "none";
+            jumpStatus = 5;
+            if (predLED) digitalWrite(LED_BUILTIN, HIGH);
             printJumpStatus();
         }
+    }
+    else if (jumpStatus == 5)
+    {
+      if (velocity < 0)
+      {
+        jumpStatus = 6;
+        if (predLED) digitalWrite(LED_BUILTIN, LOW);
+        minVelocity = 9999;
+        printJumpStatus();
+      }
+    }
+    else if (jumpStatus == 6)
+    {
+      if (velocity < -200)
+      {
+        jumpStatus = 7;
+        if (predLED) digitalWrite(LED_BUILTIN, HIGH);
+        printJumpStatus();
+      }
+    }
+    else if (jumpStatus == 7)
+    {
+      if (velocity > minVelocity and i > 5 + iMarker)
+      {
+        jumpStatus = 8;
+        if (predLED) digitalWrite(LED_BUILTIN, LOW);
+        printJumpStatus();
+      }
+    }
+    else if (jumpStatus == 8)
+    {
+      if (velocity > minVelocity / 2)
+      {
+        jumpStatus = 9;
+        if (predLED) digitalWrite(LED_BUILTIN, HIGH);
+        printJumpStatus();
+      }
+    }
+    else if (jumpStatus == 9)
+    {
+//      if (velocity > -100)
+//      {
+//        jumpStatus = 1;
+//        minVelocity = 9999;
+//        printJumpStatus();
+//      }
+    }
+    if (jumpStatus != 1 && millis() - statusStart > 1500)
+    {
+      minVelocity = 9999;
+      maxVelocity = -9999;
+      jumpStatus = 1; 
+      if (predLED) digitalWrite(LED_BUILTIN, LOW);
     }
 }
 
