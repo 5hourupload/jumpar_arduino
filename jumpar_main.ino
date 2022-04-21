@@ -15,6 +15,8 @@
 #define SWITCH_TOP 11 // limit switch top
 #define RELAY 12      // relay to control subwoofer
 #define QRD1114_PIN A0 // phototransistor
+#define Addr_Accl 0x19 // BMX055 IMU Acc
+
 
 
 bool debug = true;
@@ -54,7 +56,6 @@ char tempChars[numChars];        // temporary array for use when parsing
 int subwooferStatus = 0; // 0 is off, 1 is on
 
 // MPU6050 var
-Adafruit_MPU6050 mpu_weight;
 Adafruit_MPU6050 mpu_pred;
 
 // Jump prediction variables
@@ -89,14 +90,7 @@ float currentBrake = 20.0;
 
 int firstDrive = 0;
 
-// Weight position variables
-float distance = 0;
-float interval = 0.25;
-String currentColor = "";
-String moveDirection = "up";
 
-
-int frames = 0;
 float printInterval = 3000;
 float lastPrint = 0;
 
@@ -155,31 +149,13 @@ void setup() {
   initMPU6050_pred();
   Serial.println("IMU initialization successful!");
 
-//  initMPU6050_weight();
-
-//  delay(5000);
 }
 
 void loop() {
-  
-  
   // Predict user's jump status every 10ms
-//  predictJumpStatus();
     if (millis() - lastPredUpdate > 10){
-      predictJumpStatus();
-//      Serial.println("predicting");
-      
+      predictJumpStatus();      
       lastPredUpdate = millis();
-
-//      sensors_event_t a, g, temp;
-//      mpu_pred.getEvent(&a, &g, &temp);
-//      Serial.print("Data: ");
-//      Serial.print("acc_x_y_z ");
-//      Serial.print(a.acceleration.x);
-//      Serial.print(" ");
-//      Serial.print(a.acceleration.y);
-//      Serial.print(" ");
-//      Serial.print(a.acceleration.z);
   }
   
 
@@ -247,26 +223,8 @@ void loop() {
   
     
   if (millis() - lastPrint > 500){
-//    if (debug) Serial.print(frames);
-//    if (debug) Serial.print("YZ acc magnitude:");
-//    if (debug) Serial.print(YZ);
-//    if (debug) Serial.print(", Velocity: ");
-//    if (debug) Serial.print(velocity);
-//    if (debug) Serial.print(", Apex Vel Avg: ");
-//    if (debug) Serial.print(apexAverage); 
-//    if (debug) Serial.print(", Status 7 Vel Avg: ");
-//    if (debug) Serial.println(status7Average);
 //    if (sendCalib) Serial.print("cal-");
 //    if (sendCalib) Serial.println(apexAverage);
-//    sensors_event_t a, g, temp;
-//    mpu_pred.getEvent(&a, &g, &temp);
-//    Serial.print("Data: ");
-//    Serial.print("acc_x_y_z ");
-//    Serial.print(a.acceleration.x);
-//    Serial.print(" ");
-//    Serial.print(a.acceleration.y);
-//    Serial.print(" ");
-//    Serial.print(a.acceleration.z);
     lastPrint = millis();
     if (aliveLED) {
       if (flipLED) digitalWrite(LED_BUILTIN, HIGH);
@@ -278,8 +236,6 @@ void loop() {
     if (driveStatus == "none") {
         UART.setDuty(0);
     }
-
-//    Serial.println("");
   }
 
   // debug limit switches
@@ -330,19 +286,7 @@ void driveMotor(){
 void getMPU6050(unsigned long timeStart){
   /* Get new sensor events with the readings */
   sensors_event_t a, g, temp;
-  mpu_weight.getEvent(&a, &g, &temp);
-
-//  if (debug) Serial.print(millis() - timeStart);
-//  if (debug) Serial.print(" , ");
-//  if (debug) Serial.print(a.acceleration.x);
-//  if (debug) Serial.print(" , ");
-//  if (debug) Serial.print(a.acceleration.y);
-//  if (debug) Serial.print(" , ");
-//  if (debug) Serial.print(a.acceleration.z);
-//  if (debug) Serial.print(" ; ");
-//  if (debug) Serial.print(jumpStatus);
-//  if (debug) Serial.print(" ");
-//  //if (debug) Serial.println();
+  mpu_pred.getEvent(&a, &g, &temp);
 }
 
 void printJumpStatus()
@@ -359,8 +303,6 @@ void predictJumpStatus()
   sensors_event_t a, g, temp;
   mpu_pred.getEvent(&a, &g, &temp);
 
-  float angle = asin(min(9.8,abs(a.acceleration.z))/9.8);
-  float trueYAcc = a.acceleration.y / cos(angle);
   YZ = sqrt(sq(a.acceleration.y) + sq(a.acceleration.z));
   y_avg[i%20] = YZ;
   i++;
@@ -519,8 +461,6 @@ void startJump(float newDutyCycle, int newTimeInMS)
   if (debug) Serial.print(dutyCycle);
   if (debug) Serial.print(" timing: ");
   if (debug) Serial.println(timeinms);
-  if (dutyCycle < 0) moveDirection = "up";
-  else moveDirection = "down";
 }
 
 void recvWithStartEndMarkers() {
@@ -718,80 +658,4 @@ void initMPU6050_pred(){
 //  //if (debug) Serial.println("");
   delay(100);
 //  //if (debug) Serial.println("MPU initialized!");
-}
-
-void initMPU6050_weight(){
-//  //if (debug) Serial.println("Adafruit MPU6050 init");
-
-  // Try to initialize!
-  if (!mpu_weight.begin(0x68)) {
-    if (debug) Serial.println("Failed to find MPU6050 weight chip");
-    while (1) {
-      delay(10);
-    }
-  }
-  //if (debug) Serial.println("MPU6050 Found!");
-
-  mpu_weight.setAccelerometerRange(MPU6050_RANGE_8_G);
-//  if (debug) Serial.print("Accelerometer range set to: ");
-  switch (mpu_weight.getAccelerometerRange()) {
-  case MPU6050_RANGE_2_G:
-    //if (debug) Serial.println("+-2G");
-    break;
-  case MPU6050_RANGE_4_G:
-    //if (debug) Serial.println("+-4G");
-    break;
-  case MPU6050_RANGE_8_G:
-    //if (debug) Serial.println("+-8G");
-    break;
-  case MPU6050_RANGE_16_G:
-    //if (debug) Serial.println("+-16G");
-    break;
-  }
-  mpu_weight.setGyroRange(MPU6050_RANGE_500_DEG);
-//  if (debug) Serial.print("Gyro range set to: ");
-  switch (mpu_weight.getGyroRange()) {
-  case MPU6050_RANGE_250_DEG:
-    //if (debug) Serial.println("+- 250 deg/s");
-    break;
-  case MPU6050_RANGE_500_DEG:
-    //if (debug) Serial.println("+- 500 deg/s");
-    break;
-  case MPU6050_RANGE_1000_DEG:
-    //if (debug) Serial.println("+- 1000 deg/s");
-    break;
-  case MPU6050_RANGE_2000_DEG:
-    //if (debug) Serial.println("+- 2000 deg/s");
-    break;
-  }
-
-  mpu_weight.setFilterBandwidth(MPU6050_BAND_21_HZ);
-//  if (debug) Serial.print("Filter bandwidth set to: ");
-  switch (mpu_weight.getFilterBandwidth()) {
-  case MPU6050_BAND_260_HZ:
-    //if (debug) Serial.println("260 Hz");
-    break;
-  case MPU6050_BAND_184_HZ:
-    //if (debug) Serial.println("184 Hz");
-    break;
-  case MPU6050_BAND_94_HZ:
-    //if (debug) Serial.println("94 Hz");
-    break;
-  case MPU6050_BAND_44_HZ:
-    //if (debug) Serial.println("44 Hz");
-    break;
-  case MPU6050_BAND_21_HZ:
-    //if (debug) Serial.println("21 Hz");
-    break;
-  case MPU6050_BAND_10_HZ:
-    //if (debug) Serial.println("10 Hz");
-    break;
-  case MPU6050_BAND_5_HZ:
-    //if (debug) Serial.println("5 Hz");
-    break;
-  }
-
-  //if (debug) Serial.println("");
-  delay(100);
-  //if (debug) Serial.println("MPU initialized!");
 }
