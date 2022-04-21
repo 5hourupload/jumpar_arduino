@@ -21,11 +21,16 @@ bool debug = true;
 bool debugJumpAccel = false;
 bool debugSW = false;
 bool debugTime = false;
+bool debugPredict = true;
 bool drive = true;
 bool sendCalib = true;
 bool onlyPrediction = false;
 bool motorLED = false; // visual marker for driving debugging
-bool predLED = true;   // visual marker for prediction debugging
+bool predLED = false;   // visual marker for prediction debugging
+bool armLED = false;    // visual marker for arm/disarm debugging
+bool aliveLED = true;   // visual marker pulsating to show that uC is still alive
+
+bool flipLED = false;
 
 // driving var
 float dutyCycle = 0;
@@ -63,8 +68,8 @@ float min_y_acc = 9999;
 float velocity = 0;
 float maxVelocity = -999;
 float minVelocity = 999;
-float apexVelocity[] = {150,150,150,150,150};
-float apexAverage = 150;
+float apexVelocity[] = {0,0,0,0,0};
+float apexAverage = 0;
 float status7Velocity[] = {-5,-5,-5,-5,-5};
 float status7Average = -5;
 int jumpStatus = 1;
@@ -74,6 +79,7 @@ float powerJumpDutyCycle = -.5;
 float powerJumpDriveDuration = 100;
 float YZ = 0;
 float lastPredict = 0;
+float lastPredUpdate = 0;
 
 /** Initiate VescUart class */
 VescUart UART;
@@ -143,7 +149,7 @@ void setup() {
     pinMode(QRD1114_PIN, INPUT);
     pinMode(RELAY, OUTPUT);
   
-    digitalWrite(RELAY, LOW); // default turn off subwoofer
+    digitalWrite(RELAY, HIGH); // default turn off subwoofer
   }
 
   initMPU6050_pred();
@@ -155,8 +161,26 @@ void setup() {
 }
 
 void loop() {
-  // Predict user's jump status
-  predictJumpStatus();
+  
+  
+  // Predict user's jump status every 10ms
+//  predictJumpStatus();
+    if (millis() - lastPredUpdate > 10){
+      predictJumpStatus();
+//      Serial.println("predicting");
+      
+      lastPredUpdate = millis();
+
+//      sensors_event_t a, g, temp;
+//      mpu_pred.getEvent(&a, &g, &temp);
+//      Serial.print("Data: ");
+//      Serial.print("acc_x_y_z ");
+//      Serial.print(a.acceleration.x);
+//      Serial.print(" ");
+//      Serial.print(a.acceleration.y);
+//      Serial.print(" ");
+//      Serial.print(a.acceleration.z);
+  }
   
 
   if (!onlyPrediction){
@@ -202,10 +226,10 @@ void loop() {
 
     // Subwoofer logic
     if (subwooferStatus == 1){
-      digitalWrite(RELAY, LOW);
+      digitalWrite(RELAY, LOW); // ON
     }
     else{
-      digitalWrite(RELAY, HIGH);
+      digitalWrite(RELAY, HIGH); // OFF
     }
   
     // auto driving - debugging reliability
@@ -218,19 +242,11 @@ void loop() {
     //  driveMotor();
     //
     //  delay(2000);
-  
-    if (debugSW){
-      Serial.print("SW_B = ");
-      Serial.print(digitalRead(SWITCH_BOT));
-      Serial.print(" -- ");
-      Serial.print("SW_T = ");
-      Serial.println(digitalRead(SWITCH_TOP));
-      
-    }
+
   }
   
     
-  if (millis() - lastPrint > printInterval){
+  if (millis() - lastPrint > 500){
 //    if (debug) Serial.print(frames);
 //    if (debug) Serial.print("YZ acc magnitude:");
 //    if (debug) Serial.print(YZ);
@@ -240,11 +256,41 @@ void loop() {
 //    if (debug) Serial.print(apexAverage); 
 //    if (debug) Serial.print(", Status 7 Vel Avg: ");
 //    if (debug) Serial.println(status7Average);
-    if (sendCalib) Serial.print("Calibration: ");
-    if (sendCalib) Serial.println(apexAverage); 
+//    if (sendCalib) Serial.print("cal-");
+//    if (sendCalib) Serial.println(apexAverage);
+//    sensors_event_t a, g, temp;
+//    mpu_pred.getEvent(&a, &g, &temp);
+//    Serial.print("Data: ");
+//    Serial.print("acc_x_y_z ");
+//    Serial.print(a.acceleration.x);
+//    Serial.print(" ");
+//    Serial.print(a.acceleration.y);
+//    Serial.print(" ");
+//    Serial.print(a.acceleration.z);
     lastPrint = millis();
+    if (aliveLED) {
+      if (flipLED) digitalWrite(LED_BUILTIN, HIGH);
+      else digitalWrite(LED_BUILTIN, LOW);
+      flipLED = !flipLED;
+    }
+
+    // pinging the ESC
+    if (driveStatus == "none") {
+        UART.setDuty(0);
+    }
+
+//    Serial.println("");
   }
-  frames++;
+
+  // debug limit switches
+  if (debugSW){
+    Serial.print("SW_B = ");
+    Serial.print(digitalRead(SWITCH_BOT));
+    Serial.print(" -- ");
+    Serial.print("SW_T = ");
+    Serial.println(digitalRead(SWITCH_TOP));
+    
+  }
 }
 
 
@@ -279,10 +325,202 @@ void driveMotor(){
         driveStatus = "none";
       }
   }
-  if (driveStatus == "none") {
-    if (frames % 100 == 0)
-      UART.setDuty(0);
+}
+
+void getMPU6050(unsigned long timeStart){
+  /* Get new sensor events with the readings */
+  sensors_event_t a, g, temp;
+  mpu_weight.getEvent(&a, &g, &temp);
+
+//  if (debug) Serial.print(millis() - timeStart);
+//  if (debug) Serial.print(" , ");
+//  if (debug) Serial.print(a.acceleration.x);
+//  if (debug) Serial.print(" , ");
+//  if (debug) Serial.print(a.acceleration.y);
+//  if (debug) Serial.print(" , ");
+//  if (debug) Serial.print(a.acceleration.z);
+//  if (debug) Serial.print(" ; ");
+//  if (debug) Serial.print(jumpStatus);
+//  if (debug) Serial.print(" ");
+//  //if (debug) Serial.println();
+}
+
+void printJumpStatus()
+{  
+   if (debug) Serial.print("Jump Status = ");
+   if (debug) Serial.print(jumpStatus);
+   if (debug) Serial.print(" at ");
+   if (debug) Serial.println(millis());
+   statusStart = millis();
+}
+
+void predictJumpStatus()
+{
+  sensors_event_t a, g, temp;
+  mpu_pred.getEvent(&a, &g, &temp);
+
+  float angle = asin(min(9.8,abs(a.acceleration.z))/9.8);
+  float trueYAcc = a.acceleration.y / cos(angle);
+  YZ = sqrt(sq(a.acceleration.y) + sq(a.acceleration.z));
+  y_avg[i%20] = YZ;
+  i++;
+  float y_mov_avg = 0;
+  for (int j = 0; j < 20; j++)
+  {
+    y_mov_avg+=y_avg[j];
   }
+  y_mov_avg/=20;
+
+  velocity += YZ - 9.8;
+  if (abs(y_avg[i%20] - y_avg[(i-1)%20]) < .05 && abs(y_avg[i%20] - 9.8) < 2)
+    velocity = velocity * 0.95;
+
+  if (debugJumpAccel) Serial.print("Data: ");
+  if (debugJumpAccel) Serial.print("acc_x_y_z ");
+  if (debugJumpAccel) Serial.print(a.acceleration.x);
+  if (debugJumpAccel) Serial.print(" ");
+  if (debugJumpAccel) Serial.print(a.acceleration.y);
+  if (debugJumpAccel) Serial.print(" ");
+  if (debugJumpAccel) Serial.print(a.acceleration.z);
+  if (debugJumpAccel) Serial.print(" yz ");
+  if (debugJumpAccel) Serial.print(YZ);
+  if (debugJumpAccel) Serial.print(" velocity ");
+  if (debugJumpAccel) Serial.print(velocity);
+  if (debugJumpAccel) Serial.print(" time ");
+  if (debugJumpAccel) Serial.println(millis());
+  
+  if (velocity > maxVelocity)
+  {
+    maxVelocity = velocity;
+    iMarker = i;
+  }
+  if (velocity < minVelocity)
+  {
+    minVelocity = velocity;
+    iMarker = i;
+  }
+
+  if (jumpStatus == 1)
+  {
+        if (velocity < -30 && i > 3 + iMarker)
+        {
+            jumpStatus = 2;
+            printJumpStatus();
+        }
+  }
+   else if (jumpStatus == 2)
+   {
+       if (velocity > 0)
+       {
+           jumpStatus = 3;
+           if (predLED) digitalWrite(LED_BUILTIN, HIGH);
+           maxVelocity = -9999;
+           printJumpStatus();            
+       }
+   }
+    else if (jumpStatus == 3)
+    {
+       if (velocity < maxVelocity and i > 3 + iMarker) 
+       {
+            jumpStatus = 4;
+            if (predLED) digitalWrite(LED_BUILTIN, LOW);
+            printJumpStatus();
+       }
+    }
+    else if (jumpStatus == 4)
+    {
+       if (velocity < maxVelocity / 2)
+        {
+            jumpStatus = 5;
+            if (predLED) digitalWrite(LED_BUILTIN, HIGH);
+            printJumpStatus();
+        }
+    }
+    else if (jumpStatus == 5)
+    {
+      if (velocity < apexAverage)
+      {
+        jumpStatus = 6;
+        if (predLED) digitalWrite(LED_BUILTIN, LOW);
+        minVelocity = 9999;
+        printJumpStatus();
+      }
+    }
+    else if (jumpStatus == 6)
+    {
+//      if (velocity < status7Average)
+      if (velocity < apexAverage - 10)
+      {
+        jumpStatus = 7;
+        if (predLED) digitalWrite(LED_BUILTIN, HIGH);
+        printJumpStatus();
+      }
+    }
+    else if (jumpStatus == 7)
+    {
+      if (velocity > minVelocity and i > 3 + iMarker)
+      {
+        jumpStatus = 8;
+        if (predLED) digitalWrite(LED_BUILTIN, LOW);
+        if (debugPredict) Serial.println("cal:" + (String) apexAverage + 
+                                         ",max:" + (String) maxVelocity + 
+                                         ",min:" + (String) minVelocity + ",");
+        printJumpStatus();
+        apexVelocity[i2%5] = maxVelocity - (maxVelocity - minVelocity) / 2;
+        apexAverage = (apexVelocity[0] + apexVelocity[1] + apexVelocity[2] + apexVelocity[3] + apexVelocity[4])/5;
+        status7Velocity[i2%5] = apexVelocity[i2%5] - (apexVelocity[i2%5] - minVelocity) / 2;
+        status7Average = (status7Velocity[0] + status7Velocity[1] + status7Velocity[2] + status7Velocity[3] + status7Velocity[4])/5;
+        i2++;
+
+      }
+    }
+    else if (jumpStatus == 8)
+    {
+      if (velocity > 0)
+      {
+        jumpStatus = 9;
+        if (predLED) digitalWrite(LED_BUILTIN, HIGH);
+        printJumpStatus();
+      }
+    }
+    else if (jumpStatus == 9)
+    {
+//      if (velocity > -100)
+//      {
+//        jumpStatus = 1;
+//        minVelocity = 9999;
+//        printJumpStatus();
+//      }
+    }
+    if (jumpStatus != 1 && millis() - statusStart > 1000)
+    {
+      minVelocity = 9999;
+      maxVelocity = -9999;
+      velocity = 0;
+      jumpStatus = 1; 
+      if (predLED) digitalWrite(LED_BUILTIN, LOW);
+      if (debug) Serial.println("Jump Status = 9");
+      if (debug) Serial.println("Jump Status = 1");
+    }
+}
+
+void startJump(float newDutyCycle, int newTimeInMS)
+{
+  dutyCycle = newDutyCycle;
+  timeinms = newTimeInMS;
+
+  // Init params for timer
+  firstDrive = 0;
+  timeZero = millis();
+  timePrev = timeZero;
+  timeAtTarget = timeinms;// + timeZero;
+  driveStatus = "initial";
+  if (debug) Serial.print("Duty cycle: ");
+  if (debug) Serial.print(dutyCycle);
+  if (debug) Serial.print(" timing: ");
+  if (debug) Serial.println(timeinms);
+  if (dutyCycle < 0) moveDirection = "up";
+  else moveDirection = "down";
 }
 
 void recvWithStartEndMarkers() {
@@ -324,7 +562,14 @@ String parseData(){
     if (strtokIndx[0] == 'p')
     { 
        strtokIndx = strtok(NULL, ","); // get the 2nd part - the interation 
-       powerJump = atoi(strtokIndx) == 1? true : false;     // convert this part to an integer
+       if(atoi(strtokIndx) == 1){ // convert this part to an integer
+          powerJump = true;
+          if (armLED) digitalWrite(LED_BUILTIN, HIGH);     
+       }
+       else{
+          powerJump = false;
+          if (armLED) digitalWrite(LED_BUILTIN, LOW);     
+       }
        if (debug) Serial.print("Set powerJump to ");
        if (debug) Serial.println(powerJump);
        return "";
@@ -549,185 +794,4 @@ void initMPU6050_weight(){
   //if (debug) Serial.println("");
   delay(100);
   //if (debug) Serial.println("MPU initialized!");
-}
-
-
-void getMPU6050(unsigned long timeStart){
-  /* Get new sensor events with the readings */
-  sensors_event_t a, g, temp;
-  mpu_weight.getEvent(&a, &g, &temp);
-
-//  if (debug) Serial.print(millis() - timeStart);
-//  if (debug) Serial.print(" , ");
-//  if (debug) Serial.print(a.acceleration.x);
-//  if (debug) Serial.print(" , ");
-//  if (debug) Serial.print(a.acceleration.y);
-//  if (debug) Serial.print(" , ");
-//  if (debug) Serial.print(a.acceleration.z);
-//  if (debug) Serial.print(" ; ");
-//  if (debug) Serial.print(jumpStatus);
-//  if (debug) Serial.print(" ");
-//  //if (debug) Serial.println();
-}
-
-void printJumpStatus()
-{  
-   if (debug) Serial.print("Jump Status = ");
-   if (debug) Serial.println(jumpStatus);
-   statusStart = millis();
-}
-
-void predictJumpStatus()
-{
-  sensors_event_t a, g, temp;
-  mpu_pred.getEvent(&a, &g, &temp);
-
-//  float angle = asin(min(9.8,abs(a.acceleration.z))/9.8);
-//  float trueYAcc = a.acceleration.y / cos(angle);
-  YZ = sqrt(a.acceleration.y * a.acceleration.y + a.acceleration.z * a.acceleration.z);
-  y_avg[i%20] = YZ;
-  i++;
-  float y_mov_avg = 0;
-  for (int j = 0; j < 20; j++)
-  {
-    y_mov_avg+=y_avg[j];
-  }
-  y_mov_avg/=20;
-
-  velocity += YZ - 9.8;
-  if (abs(y_avg[i%20] - y_avg[(i-1)%20]) < .05 && abs(y_avg[i%20] - 9.8) < 2)
-    velocity = velocity * 0.95;
-
-  if (debugJumpAccel) Serial.print("y - ");
-  if (debugJumpAccel) Serial.print(a.acceleration.y);
-  if (debugJumpAccel) Serial.print(" yz - ");
-  if (debugJumpAccel) Serial.print(YZ);
-  if (debugJumpAccel) Serial.print(" - velocity ");
-  if (debugJumpAccel) Serial.println(velocity);
-  
-  if (velocity > maxVelocity)
-  {
-    maxVelocity = velocity;
-    iMarker = i;
-  }
-  if (velocity < minVelocity)
-  {
-    minVelocity = velocity;
-    iMarker = i;
-  }
-
-  if (jumpStatus == 1)
-  {
-        if (velocity < -100 && i > 3 + iMarker)
-        {
-            jumpStatus = 2;
-            printJumpStatus();
-        }
-  }
-   else if (jumpStatus == 2)
-   {
-       if (velocity > 0)
-       {
-           jumpStatus = 3;
-           if (predLED) digitalWrite(LED_BUILTIN, HIGH);
-           maxVelocity = -9999;
-           printJumpStatus();            
-       }
-   }
-    else if (jumpStatus == 3)
-    {
-       if (velocity < maxVelocity and i > 3 + iMarker) 
-       {
-            jumpStatus = 4;
-            if (predLED) digitalWrite(LED_BUILTIN, LOW);
-            printJumpStatus();
-       }
-    }
-    else if (jumpStatus == 4)
-    {
-       if (velocity < maxVelocity / 2)
-        {
-            jumpStatus = 5;
-            if (predLED) digitalWrite(LED_BUILTIN, HIGH);
-            printJumpStatus();
-        }
-    }
-    else if (jumpStatus == 5)
-    {
-      if (velocity < apexAverage)
-      {
-        jumpStatus = 6;
-        if (predLED) digitalWrite(LED_BUILTIN, LOW);
-        minVelocity = 9999;
-        printJumpStatus();
-      }
-    }
-    else if (jumpStatus == 6)
-    {
-      if (velocity < status7Average)
-      {
-        jumpStatus = 7;
-        if (predLED) digitalWrite(LED_BUILTIN, HIGH);
-        printJumpStatus();
-      }
-    }
-    else if (jumpStatus == 7)
-    {
-      if (velocity > minVelocity and i > 3 + iMarker)
-      {
-        jumpStatus = 8;
-        if (predLED) digitalWrite(LED_BUILTIN, LOW);
-        printJumpStatus();
-        apexVelocity[i2%5] = maxVelocity - (maxVelocity - minVelocity) / 2;
-        apexAverage = (apexVelocity[0] + apexVelocity[1] + apexVelocity[2] + apexVelocity[3] + apexVelocity[4])/5;
-        status7Velocity[i2%5] = apexVelocity[i2%5] - (apexVelocity[i2%5] - minVelocity) / 2;
-        status7Average = (status7Velocity[0] + status7Velocity[1] + status7Velocity[2] + status7Velocity[3] + status7Velocity[4])/5;
-        i2++;
-
-      }
-    }
-    else if (jumpStatus == 8)
-    {
-      if (velocity > minVelocity / 2)
-      {
-        jumpStatus = 9;
-        if (predLED) digitalWrite(LED_BUILTIN, HIGH);
-        printJumpStatus();
-      }
-    }
-    else if (jumpStatus == 9)
-    {
-//      if (velocity > -100)
-//      {
-//        jumpStatus = 1;
-//        minVelocity = 9999;
-//        printJumpStatus();
-//      }
-    }
-    if (jumpStatus != 1 && millis() - statusStart > 1500)
-    {
-      minVelocity = 9999;
-      maxVelocity = -9999;
-      jumpStatus = 1; 
-      if (predLED) digitalWrite(LED_BUILTIN, LOW);
-    }
-}
-
-void startJump(float newDutyCycle, int newTimeInMS)
-{
-  dutyCycle = newDutyCycle;
-  timeinms = newTimeInMS;
-
-  // Init params for timer
-  firstDrive = 0;
-  timeZero = millis();
-  timePrev = timeZero;
-  timeAtTarget = timeinms;// + timeZero;
-  driveStatus = "initial";
-  if (debug) Serial.print("Duty cycle: ");
-  if (debug) Serial.print(dutyCycle);
-  if (debug) Serial.print(" timing: ");
-  if (debug) Serial.println(timeinms);
-  if (dutyCycle < 0) moveDirection = "up";
-  else moveDirection = "down";
 }
