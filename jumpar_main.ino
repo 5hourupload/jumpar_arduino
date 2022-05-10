@@ -18,12 +18,14 @@
 #define Addr_Accl 0x19 // BMX055 IMU Acc
 
 
+String currentIMU = "BMX055"; // Either BMX055 or MPU6050
+//String currentIMU = "MPU6050"; // Either BMX055 or MPU6050
 
 bool debug = true;
-bool debugJumpAccel = false;
 bool debugSW = false;
 bool debugTime = false;
 bool debugPredict = true;
+
 bool drive = true;
 bool sendCalib = true;
 bool onlyPrediction = false;
@@ -100,6 +102,9 @@ String controlMode = "arduino";
 boolean powerJump = false;
 String powerJumpPhase = "none";
 
+float xAccl = 0.00;
+float yAccl = 0.00;
+float zAccl = 0.00;
 
 
 void setup() {
@@ -146,7 +151,11 @@ void setup() {
     digitalWrite(RELAY, HIGH); // default turn off subwoofer
   }
 
-  initMPU6050_pred();
+  if (currentIMU == "MPU6050") initMPU6050_pred();
+  if (currentIMU == "BMX055") { 
+    Wire.begin();
+    BMX055_Init();
+  }
   Serial.println("IMU initialization successful!");
 
 }
@@ -224,7 +233,7 @@ void loop() {
     
   if (millis() - lastPrint > 500){
 //    if (sendCalib) Serial.print("cal-");
-//    if (sendCalib) Serial.println(apexAverage);
+    if (debug) Serial.println(velocity);
     lastPrint = millis();
     if (aliveLED) {
       if (flipLED) digitalWrite(LED_BUILTIN, HIGH);
@@ -233,9 +242,9 @@ void loop() {
     }
 
     // pinging the ESC
-    if (driveStatus == "none") {
+    if (!onlyPrediction)
+      if (driveStatus == "none")
         UART.setDuty(0);
-    }
   }
 
   // debug limit switches
@@ -300,36 +309,28 @@ void printJumpStatus()
 
 void predictJumpStatus()
 {
-  sensors_event_t a, g, temp;
-  mpu_pred.getEvent(&a, &g, &temp);
+  if (currentIMU == "MPU6050") {
+    sensors_event_t a, g, temp;
+    mpu_pred.getEvent(&a, &g, &temp);
+    YZ = sqrt(sq(a.acceleration.y) + sq(a.acceleration.z));
 
-  YZ = sqrt(sq(a.acceleration.y) + sq(a.acceleration.z));
+  }
+  if (currentIMU == "BMX055") {
+      BMX055_Accl();
+      YZ = sqrt(sq(xAccl) + sq(zAccl));
+//      Serial.print(millis());Serial.print(" - Accl= ");Serial.print(xAccl);Serial.print(", ");Serial.print(yAccl);Serial.print(", ");Serial.print(zAccl);
+//      Serial.println("");
+//      Serial.println(YZ);
+  }
+  
   y_avg[i%20] = YZ;
   i++;
-  float y_mov_avg = 0;
-  for (int j = 0; j < 20; j++)
-  {
-    y_mov_avg+=y_avg[j];
-  }
-  y_mov_avg/=20;
 
   velocity += YZ - 9.8;
+  
+  //Dampen velocity
   if (abs(y_avg[i%20] - y_avg[(i-1)%20]) < .05 && abs(y_avg[i%20] - 9.8) < 2)
     velocity = velocity * 0.95;
-
-  if (debugJumpAccel) Serial.print("Data: ");
-  if (debugJumpAccel) Serial.print("acc_x_y_z ");
-  if (debugJumpAccel) Serial.print(a.acceleration.x);
-  if (debugJumpAccel) Serial.print(" ");
-  if (debugJumpAccel) Serial.print(a.acceleration.y);
-  if (debugJumpAccel) Serial.print(" ");
-  if (debugJumpAccel) Serial.print(a.acceleration.z);
-  if (debugJumpAccel) Serial.print(" yz ");
-  if (debugJumpAccel) Serial.print(YZ);
-  if (debugJumpAccel) Serial.print(" velocity ");
-  if (debugJumpAccel) Serial.print(velocity);
-  if (debugJumpAccel) Serial.print(" time ");
-  if (debugJumpAccel) Serial.println(millis());
   
   if (velocity > maxVelocity)
   {
@@ -413,7 +414,6 @@ void predictJumpStatus()
         status7Velocity[i2%5] = apexVelocity[i2%5] - (apexVelocity[i2%5] - minVelocity) / 2;
         status7Average = (status7Velocity[0] + status7Velocity[1] + status7Velocity[2] + status7Velocity[3] + status7Velocity[4])/5;
         i2++;
-
       }
     }
     else if (jumpStatus == 8)
@@ -427,12 +427,7 @@ void predictJumpStatus()
     }
     else if (jumpStatus == 9)
     {
-//      if (velocity > -100)
-//      {
-//        jumpStatus = 1;
-//        minVelocity = 9999;
-//        printJumpStatus();
-//      }
+      // Nothing, just wait to reset
     }
     if (jumpStatus != 1 && millis() - statusStart > 1000)
     {
@@ -658,4 +653,53 @@ void initMPU6050_pred(){
 //  //if (debug) Serial.println("");
   delay(100);
 //  //if (debug) Serial.println("MPU initialized!");
+}
+
+
+void BMX055_Init()
+{
+//------------------------------------------------------------//
+Wire.beginTransmission(Addr_Accl);
+Wire.write(0x0F); // Select PMU_Range register
+Wire.write(0x03); // Range = +/- 2g
+Wire.endTransmission();
+delay(100);
+//------------------------------------------------------------//
+Wire.beginTransmission(Addr_Accl);
+Wire.write(0x10); // Select PMU_BW register
+Wire.write(0x08); // Bandwidth = 7.81 Hz
+Wire.endTransmission();
+delay(100);
+//------------------------------------------------------------//
+Wire.beginTransmission(Addr_Accl);
+Wire.write(0x11); // Select PMU_LPW register
+Wire.write(0x00); // Normal mode, Sleep duration = 0.5ms
+Wire.endTransmission();
+delay(100);
+}
+
+void BMX055_Accl()
+{
+  int data[6];
+  for (int i = 0; i < 6; i++)
+  {
+    Wire.beginTransmission(Addr_Accl);
+    Wire.write((2 + i));// Select data register
+    Wire.endTransmission();
+    Wire.requestFrom(Addr_Accl, 1);// Request 1 byte of data
+    // Read 6 bytes of data
+    // xAccl lsb, xAccl msb, yAccl lsb, yAccl msb, zAccl lsb, zAccl msb
+    if (Wire.available() == 1)
+      data[i] = Wire.read();
+  }
+  // Convert the data to 12-bits
+  xAccl = ((data[1] * 256) + (data[0] & 0xF0)) / 16;
+  if (xAccl > 2047) xAccl -= 4096;
+  yAccl = ((data[3] * 256) + (data[2] & 0xF0)) / 16;
+  if (yAccl > 2047) yAccl -= 4096;
+  zAccl = ((data[5] * 256) + (data[4] & 0xF0)) / 16;
+  if (zAccl > 2047) zAccl -= 4096;
+  xAccl = xAccl * 0.0098; // renge +-2g
+  yAccl = yAccl * 0.0098; // renge +-2g
+  zAccl = zAccl * 0.0098; // renge +-2g
 }
